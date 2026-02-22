@@ -139,6 +139,18 @@ async def sync_tokens(background_tasks: BackgroundTasks, password: str = Form(..
     background_tasks.add_task(refresh_user_tokens, dbs)
     return {"status": "sync_initiated"}
 
+@app.get("/api/cron/refresh")
+async def cron_refresh_tokens(password: str, dbs: Session = Depends(get_db)):
+    """
+    Automated endpoint for Vercel Cron Jobs to keep tokens alive.
+    URL: /api/cron/refresh?password=YOUR_ADMIN_PASSWORD
+    """
+    if password != config.ADMIN_PASSWORD:
+        return {"error": "Unauthorized"}
+    
+    refreshed, failed = await refresh_user_tokens(dbs)
+    return {"status": "success", "refreshed": refreshed, "failed": failed}
+
 @app.post("/admin/restore")
 async def restore_members(guild_id: str = Form(...), password: str = Form(...), dbs: Session = Depends(get_db)):
     if password != config.ADMIN_PASSWORD:

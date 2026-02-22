@@ -20,6 +20,8 @@ class Member(Base):
     last_updated = Column(DateTime, default=datetime.datetime.utcnow)
 
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
 # Database Setup
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./vault.db")

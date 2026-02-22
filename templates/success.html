@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verification Successful</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body class="flex items-center justify-center min-h-screen">
+    <div class="mesh-bg"></div>
+
+    <div class="glass-card p-10 max-w-md w-full text-center">
+        <div
+            class="w-20 h-20 bg-green-500/20 rounded-full mx-auto flex items-center justify-center border border-green-500/50 mb-6">
+            <svg class="w-10 h-10 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+            </svg>
+        </div>
+
+        <h1 class="text-2xl font-bold mb-2">Verification Complete</h1>
+        <p class="text-gray-400 mb-8">Welcome, <span class="text-white font-bold">{{ user.username }}</span>. You are
+            now authorized. You can close this window and return to Discord.</p>
+
+        <p class="text-[11px] text-gray-500 uppercase tracking-widest mono">Reference ID: {{ user.id }}</p>
+    </div>
+</body>
+
+</html>

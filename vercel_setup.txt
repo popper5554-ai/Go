@@ -1,0 +1,16 @@
+OXY VAULT - VERCEL DEPLOYMENT COMMANDS
+=========================================
+
+1. npm i -g vercel
+2. vercel login
+3. vercel
+4. (Set up variables)
+   - vercel env add DATABASE_URL
+   - vercel env add CLIENT_ID
+   - vercel env add CLIENT_SECRET
+   - vercel env add BOT_TOKEN
+   - vercel env add REDIRECT_URI
+   - vercel env add ADMIN_PASSWORD
+5. vercel --prod
+
+NOTE: Update your Discord Developer Portal Redirect URI to match your Vercel URL.

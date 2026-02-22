@@ -15,5 +15,11 @@
       "src": "/(.*)",
       "dest": "main.py"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/refresh?password=oxy_admin_123",
+      "schedule": "0 * * * *"
+    }
   ]
 }

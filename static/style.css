@@ -1,0 +1,77 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@500&display=swap');
+
+:root {
+    --blood-red: #ff0000;
+    --dark-blood: #a50000;
+    --bg-black: #050505;
+    --card-bg: rgba(15, 15, 15, 0.8);
+    --border-red: rgba(255, 0, 0, 0.2);
+}
+
+body {
+    background-color: var(--bg-black);
+    color: #ffffff;
+    font-family: 'Inter', sans-serif;
+    margin: 0;
+    overflow-x: hidden;
+}
+
+/* Gradients for background */
+.mesh-bg {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: radial-gradient(circle at 50% 50%, rgba(255, 0, 0, 0.05) 0%, rgba(0, 0, 0, 1) 100%);
+    z-index: -1;
+}
+
+.matrix-canvas {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: -1;
+    opacity: 0.1;
+}
+
+.glass-card {
+    background: var(--card-bg);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--border-red);
+    border-radius: 16px;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+    transition: transform 0.3s ease, border-color 0.3s ease;
+}
+
+.glass-card:hover {
+    border-color: var(--blood-red);
+    transform: translateY(-5px);
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--blood-red) 0%, var(--dark-blood) 100%);
+    color: white;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    padding: 1rem 2rem;
+    border-radius: 8px;
+    display: inline-block;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    box-shadow: 0 0 15px rgba(255, 0, 0, 0.3);
+}
+
+.btn-primary:hover {
+    box-shadow: 0 0 30px rgba(255, 0, 0, 0.6);
+    transform: scale(1.05);
+}
+
+.glow-text {
+    text-shadow: 0 0 10px rgba(255, 0, 0, 0.8);
+}
+
+.mono {
+    font-family: 'JetBrains Mono', monospace;
+}
